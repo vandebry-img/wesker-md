@@ -1,39 +1,155 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, Browsers } = require('@whiskeysockets/baileys');
+// ============================================
+// 𝐖𝐞𝐬𝐤𝐞𝐫-𝐌𝐃 WhatsApp Bot
+// Created by: 𝐅𝐞𝐛𝐫𝐲𝐖𝐞𝐬𝐤𝐞𝐫
+// Version: 2.0.0
+// ============================================
+
+const { 
+    default: makeWASocket, 
+    useMultiFileAuthState, 
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore,
+    Browsers,
+    downloadContentFromMessage,
+    getAggregateVotesInPollMessage,
+    proto
+} = require('@whiskeysockets/baileys');
+
 const pino = require('pino');
 const fs = require('fs-extra');
 const path = require('path');
 const chalk = require('chalk');
 const moment = require('moment-timezone');
-moment.tz.setDefault('Asia/Jakarta');
+const gradient = require('gradient-string');
+const figlet = require('figlet');
+const { exec } = require('child_process');
+const util = require('util');
+const axios = require('axios');
 
 // Config
 const config = require('./config');
+moment.tz.setDefault('Asia/Jakarta');
 
-// Buat folder session
-if (!fs.existsSync('./session')) fs.mkdirSync('./session', { recursive: true });
-if (!fs.existsSync('./media')) fs.mkdirSync('./media', { recursive: true });
+// Buat folder jika belum ada
+const folders = ['session', 'media', 'plugins', 'logs', 'temp', 'database'];
+folders.forEach(folder => {
+    if (!fs.existsSync(folder)) {
+        fs.mkdirSync(folder, { recursive: true });
+    }
+});
 
-const logger = pino({ level: 'silent' });
+// Load plugins
+const plugins = {};
+const pluginsDir = path.join(__dirname, 'plugins');
 
-async function startBot() {
-    console.log(chalk.green.bold(`
-╔══════════════════════════════╗
-║     𝐖𝐞𝐬𝐤𝐞𝐫-𝐌𝐃 𝐁𝐨𝐭          ║
-║     Owner: ${config.author}     ║
-╚══════════════════════════════╝
+if (fs.existsSync(pluginsDir)) {
+    const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
+    
+    for (const file of pluginFiles) {
+        try {
+            const plugin = require(path.join(pluginsDir, file));
+            plugins[plugin.name] = plugin;
+            console.log(chalk.green(`✅ Plugin loaded: ${plugin.name}`));
+        } catch (error) {
+            console.error(chalk.red(`❌ Failed to load plugin ${file}:`), error);
+        }
+    }
+}
+
+// Banner
+function showBanner() {
+    console.clear();
+    console.log(gradient.rainbow(figlet.textSync('Wesker-MD', {
+        font: 'Standard',
+        horizontalLayout: 'default',
+        verticalLayout: 'default'
+    })));
+    
+    console.log(gradient.pastel(`
+╔══════════════════════════════════════════════════╗
+║     🤖 𝐖𝐞𝐬𝐤𝐞𝐫-𝐌𝐃 WhatsApp Bot                    ║
+║     👑 Owner: ${config.author}                    ║
+║     📱 Phone: ${config.owner[0]}                 ║
+║     ⚡ Version: 2.0.0                             ║
+║     🕒 Time: ${moment().format('DD/MM/YYYY HH:mm:ss')}  ║
+╚══════════════════════════════════════════════════╝
     `));
+}
 
+// Helper functions
+class Helper {
+    static formatSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    static formatUptime(uptime) {
+        const hours = Math.floor(uptime / 3600);
+        const minutes = Math.floor((uptime % 3600) / 60);
+        const seconds = Math.floor(uptime % 60);
+        return `${hours} jam ${minutes} menit ${seconds} detik`;
+    }
+
+    static isOwner(sender) {
+        if (!sender) return false;
+        const phone = sender.split('@')[0];
+        return config.owner.includes(phone) || 
+               config.owner.includes(phone.replace('62', '628')) ||
+               config.owner.includes('62' + phone.slice(2)) ||
+               config.owner.includes('0' + phone.slice(2));
+    }
+
+    static async downloadMedia(msg, type = 'image') {
+        try {
+            const media = msg.message.imageMessage || 
+                         msg.message.videoMessage || 
+                         msg.message.audioMessage || 
+                         msg.message.documentMessage;
+            
+            if (!media) return null;
+            
+            const stream = await downloadContentFromMessage(media, type);
+            let buffer = Buffer.from([]);
+            
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
+            }
+            
+            return buffer;
+        } catch (error) {
+            console.error('Download error:', error);
+            return null;
+        }
+    }
+
+    static getRandom(items) {
+        return items[Math.floor(Math.random() * items.length)];
+    }
+}
+
+// Main bot function
+async function startBot() {
+    showBanner();
+    
+    console.log(chalk.cyan('🚀 Starting Wesker-MD Bot...'));
+    console.log(chalk.yellow('📁 Loading session...'));
+    
     const { state, saveCreds } = await useMultiFileAuthState('./session');
     
-    const { version } = await fetchLatestBaileysVersion();
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(chalk.blue(`📦 Using WA v${version.join('.')}, latest: ${isLatest}`));
     
     const sock = makeWASocket({
         version,
-        logger,
-        printQRInTerminal: false, // Nonaktifkan QR
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: false,
         auth: {
             creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, logger),
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
         },
         browser: Browsers.macOS('Safari'),
         generateHighQualityLinkPreview: true,
@@ -44,313 +160,283 @@ async function startBot() {
         },
     });
 
+    // Save credentials when updated
     sock.ev.on('creds.update', saveCreds);
 
+    // Connection update handler
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr, isNewLogin } = update;
         
         if (qr) {
-            console.log(chalk.yellow('⚠️  QR Code terdeteksi, tapi mode pairing aktif.'));
+            console.log(chalk.yellow('⚠️  QR Code detected, but pairing mode is active.'));
+            console.log(chalk.yellow('   Run: node pair.js for pairing code'));
         }
         
         if (connection === 'close') {
-            let reason = new Boom(lastDisconnect.error).output.statusCode;
-            if (reason === DisconnectReason.badSession) {
-                console.log(chalk.red('Session rusak, hapus folder session dan restart bot.'));
-                sock.logout();
-            } else if (reason === DisconnectReason.connectionClosed) {
-                console.log(chalk.yellow('Koneksi tertutup, mencoba reconnect...'));
+            let reason = new Error(lastDisconnect?.error?.message || 'Unknown');
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            
+            console.log(chalk.red(`🔌 Connection closed: ${reason.message}`));
+            
+            if (statusCode === DisconnectReason.badSession) {
+                console.log(chalk.red('🗑️  Bad session, deleting...'));
+                await fs.remove('./session');
+                console.log(chalk.yellow('🔄 Restarting...'));
                 startBot();
-            } else if (reason === DisconnectReason.connectionLost) {
-                console.log(chalk.yellow('Koneksi hilang, mencoba reconnect...'));
+            } else if (statusCode === DisconnectReason.connectionClosed) {
+                console.log(chalk.yellow('🔄 Connection closed, reconnecting...'));
                 startBot();
-            } else if (reason === DisconnectReason.connectionReplaced) {
-                console.log(chalk.red('Koneksi diganti di perangkat lain, logout...'));
-                sock.logout();
-            } else if (reason === DisconnectReason.loggedOut) {
-                console.log(chalk.red('Device logged out, hapus folder session dan restart bot.'));
-                sock.logout();
-            } else if (reason === DisconnectReason.restartRequired) {
-                console.log(chalk.yellow('Restart required, restarting...'));
+            } else if (statusCode === DisconnectReason.connectionLost) {
+                console.log(chalk.yellow('📡 Connection lost, reconnecting...'));
                 startBot();
-            } else if (reason === DisconnectReason.timedOut) {
-                console.log(chalk.yellow('Connection timeout, reconnecting...'));
+            } else if (statusCode === DisconnectReason.connectionReplaced) {
+                console.log(chalk.red('🔄 Connection replaced on another device.'));
+                console.log(chalk.yellow('📱 Please restart bot.'));
+                process.exit(0);
+            } else if (statusCode === DisconnectReason.loggedOut) {
+                console.log(chalk.red('🔓 Logged out, deleting session...'));
+                await fs.remove('./session');
+                console.log(chalk.yellow('🔄 Please pair again with: node pair.js'));
+                process.exit(0);
+            } else if (statusCode === DisconnectReason.restartRequired) {
+                console.log(chalk.yellow('🔄 Restart required...'));
+                startBot();
+            } else if (statusCode === DisconnectReason.timedOut) {
+                console.log(chalk.yellow('⏰ Connection timeout, reconnecting...'));
                 startBot();
             } else {
-                console.log(chalk.red(`Unknown disconnect reason: ${reason}`));
+                console.log(chalk.yellow('🔄 Unknown disconnect, reconnecting...'));
                 startBot();
             }
         }
         
         if (connection === 'open') {
-            console.log(chalk.green('✅ Bot berhasil terhubung ke WhatsApp!'));
-            console.log(chalk.cyan(`📱 Terhubung sebagai: ${sock.user?.name || 'Unknown'}`));
-            console.log(chalk.cyan(`🆔 User ID: ${sock.user?.id || 'Unknown'}`));
-            console.log(chalk.cyan(`⏰ Waktu: ${moment().format('DD/MM/YYYY HH:mm:ss')}`));
+            console.log(chalk.green('✅ Successfully connected to WhatsApp!'));
+            console.log(chalk.cyan(`👤 User: ${sock.user?.name || 'Unknown'}`));
+            console.log(chalk.cyan(`🆔 ID: ${sock.user?.id || 'Unknown'}`));
+            console.log(chalk.cyan(`📱 Platform: ${sock.user?.platform || 'Unknown'}`));
+            console.log(chalk.cyan(`⏰ Connected at: ${moment().format('HH:mm:ss')}`));
             
-            // Update profile picture jika ada
+            // Update profile
             try {
-                if (fs.existsSync('./media/logo.jpg')) {
-                    const pic = fs.readFileSync('./media/logo.jpg');
-                    await sock.updateProfilePicture(sock.user.id, pic);
-                    console.log(chalk.green('🖼️ Profile picture berhasil diupdate!'));
+                const profilePic = './media/profile.jpg';
+                if (fs.existsSync(profilePic)) {
+                    const picBuffer = fs.readFileSync(profilePic);
+                    await sock.updateProfilePicture(sock.user.id, picBuffer);
+                    console.log(chalk.green('🖼️  Profile picture updated!'));
                 }
+                
+                // Set status
+                await sock.updateProfileStatus(`🤖 ${config.botName} | Online`);
             } catch (err) {
-                console.log(chalk.yellow('⚠️  Gagal update profile picture'));
+                console.log(chalk.yellow('⚠️  Could not update profile'));
             }
         }
         
-        // Jika ada pairing code atau isNewLogin
         if (isNewLogin) {
-            console.log(chalk.green('🔄 Login baru terdeteksi!'));
+            console.log(chalk.green('🆕 New login detected!'));
         }
     });
 
-    // Handle messages
+    // Message handler
     sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
-        
-        const from = msg.key.remoteJid;
-        const sender = msg.key.participant || from;
-        const type = Object.keys(msg.message)[0];
-        let text = '';
-        
-        if (type === 'conversation') text = msg.message.conversation;
-        if (type === 'extendedTextMessage') text = msg.message.extendedTextMessage.text;
-        if (type === 'imageMessage') text = msg.message.imageMessage.caption || '';
-        
-        const command = text.toLowerCase().trim();
-        const pushname = msg.pushName || 'User';
-        
-        console.log(chalk.cyan(`📨 [${moment().format('HH:mm:ss')}] ${pushname}: ${text}`));
-        
-        // Handle commands
-        if (command === '.menu' || command === '!menu' || command === '/menu') {
-            await sock.sendMessage(from, {
-                text: `Halo *${pushname}*! 👋
-
-*🤖 𝐖𝐞𝐬𝐤𝐞𝐫-𝐌𝐃 𝐁𝐨𝐭*
-_Dibuat oleh ${config.author}_
-
-📁 *MENU UTAMA*
-• .menu - Menu utama
-• .help - Bantuan
-• .owner - Owner bot
-• .info - Info bot
-• .ping - Cek kecepatan
-
-🎮 *BUTTON MENU*
-• .button - Demo button
-• .list - Demo list
-• .template - Demo template
-
-📊 *STATUS*
-• .status - Status bot
-• .runtime - Waktu aktif
-
-_*Gunakan prefix: ${config.prefa.join(' ')}*_`,
-                footer: config.botName,
-                headerType: 1
-            });
-        }
-        
-        else if (command === '.button' || command === '!button') {
-            await sock.sendMessage(from, {
-                text: "*Contoh Button Menu*\nPilih salah satu:",
-                buttons: [
-                    { buttonId: 'id1', buttonText: { displayText: '🎮 Game' }, type: 1 },
-                    { buttonId: 'id2', buttonText: { displayText: '📊 Info' }, type: 1 },
-                    { buttonId: 'id3', buttonText: { displayText: '👑 Owner' }, type: 1 },
-                    { buttonId: 'id4', buttonText: { displayText: '❌ Tutup' }, type: 1 }
-                ],
-                footer: config.botName
-            });
-        }
-        
-        else if (command === '.list' || command === '!list') {
-            await sock.sendMessage(from, {
-                text: "*List Menu Pilihan*",
-                title: "Pilih Kategori:",
-                buttonText: "Klik Disini",
-                sections: [
-                    {
-                        title: "📁 KATEGORI UTAMA",
-                        rows: [
-                            { title: "🎮 Game", rowId: ".game" },
-                            { title: "📊 Informasi", rowId: ".info" },
-                            { title: "⚙️ Settings", rowId: ".settings" }
-                        ]
-                    },
-                    {
-                        title: "🔧 TOOLS",
-                        rows: [
-                            { title: "🛠️ Tools", rowId: ".tools" },
-                            { title: "📈 Stats", rowId: ".stats" },
-                            { title: "ℹ️ About", rowId: ".about" }
-                        ]
-                    }
-                ]
-            });
-        }
-        
-        else if (command === '.template' || command === '!template') {
-            await sock.sendMessage(from, {
-                text: "*Template Button*",
-                templateButtons: [
-                    {
-                        index: 1,
-                        urlButton: {
-                            displayText: "🌐 Website",
-                            url: "https://github.com/vryptt/buttons-warpper"
-                        }
-                    },
-                    {
-                        index: 2,
-                        callButton: {
-                            displayText: "📞 Call Owner",
-                            phoneNumber: config.owner[0]
-                        }
-                    },
-                    {
-                        index: 3,
-                        quickReplyButton: {
-                            displayText: "🎮 Quick Reply",
-                            id: "qr-menu"
-                        }
-                    }
-                ]
-            });
-        }
-        
-        else if (command === '.owner' || command === '!owner') {
-            await sock.sendMessage(from, {
-                text: `*👑 OWNER BOT*
-Nama: ${config.author}
-Nomor: ${config.owner[0]}
-WhatsApp: https://wa.me/${config.owner[0].replace('+', '')}
-
-Hubungi owner untuk informasi lebih lanjut!`,
-                footer: config.botName
-            });
-        }
-        
-        else if (command === '.ping' || command === '!ping') {
-            const start = Date.now();
-            const sent = await sock.sendMessage(from, { text: '🏓 Pong!' });
-            const latency = Date.now() - start;
-            await sock.sendMessage(from, { 
-                text: `*Speed Test*\n\n🏓 Latency: ${latency}ms\n📶 Connection: Excellent` 
-            });
-        }
-        
-        else if (command === '.info' || command === '!info') {
-            await sock.sendMessage(from, {
-                text: `*🤖 BOT INFORMATION*
-Nama: ${config.botName}
-Owner: ${config.author}
-Nomor Owner: ${config.owner[0]}
-Versi: 2.0.0
-Status: Active
-Mode: Pairing Code
-Library: Baileys MD
-Prefix: ${config.prefa.join(', ')}
-
-_*Bot ini menggunakan pairing code tanpa QR*_`,
-                footer: config.botName
-            });
-        }
-        
-        else if (command === '.status' || command === '!status') {
-            const used = process.memoryUsage();
-            await sock.sendMessage(from, {
-                text: `*📊 BOT STATUS*
-Memory Usage:
-• RSS: ${Math.round(used.rss / 1024 / 1024)}MB
-• Heap: ${Math.round(used.heapUsed / 1024 / 1024)}MB
-• Total: ${Math.round(used.heapTotal / 1024 / 1024)}MB
-
-Platform: ${process.platform}
-Node.js: ${process.version}
-Uptime: ${process.uptime().toFixed(2)}s`
-            });
-        }
-        
-        else if (command === '.runtime' || command === '!runtime') {
-            const uptime = process.uptime();
-            const hours = Math.floor(uptime / 3600);
-            const minutes = Math.floor((uptime % 3600) / 60);
-            const seconds = Math.floor(uptime % 60);
+        try {
+            const msg = m.messages[0];
+            if (!msg.message || msg.key.fromMe) return;
             
-            await sock.sendMessage(from, {
-                text: `*⏰ RUNTIME BOT*
-Bot telah aktif selama:
-${hours} Jam ${minutes} Menit ${seconds} Detik
-
-Sejak: ${moment(Date.now() - (uptime * 1000)).format('DD/MM/YYYY HH:mm:ss')}`
-            });
-        }
-        
-        else if (command === '.help' || command === '!help') {
-            await sock.sendMessage(from, {
-                text: `*📋 HELP MENU*
-
-*PERINTAH UTAMA*
-• .menu - Menu utama bot
-• .help - Menampilkan pesan ini
-• .owner - Kontak owner
-• .info - Informasi bot
-
-*BUTTON & TEMPLATE*
-• .button - Contoh button
-• .list - Contoh list message
-• .template - Contoh template button
-
-*STATUS & INFO*
-• .ping - Test kecepatan
-• .status - Status memory
-• .runtime - Waktu aktif bot
-
-*PENTING*
-- Bot ini menggunakan pairing code
-- Hanya owner yang bisa akses semua fitur
-- Laporkan bug ke owner`,
-                footer: config.botName
-            });
-        }
-        
-        // Response untuk button yang diklik
-        if (msg.message?.templateButtonReplyMessage || msg.message?.buttonsResponseMessage) {
-            const buttonId = msg.message.templateButtonReplyMessage?.selectedId || 
-                            msg.message.buttonsResponseMessage?.selectedButtonId;
+            const from = msg.key.remoteJid;
+            const sender = msg.key.participant || from;
+            const pushname = msg.pushName || 'User';
+            const isGroup = from.endsWith('@g.us');
+            const isOwner = Helper.isOwner(sender);
             
-            if (buttonId === 'id1') {
-                await sock.sendMessage(from, { text: "🎮 Anda memilih Game!" });
-            } else if (buttonId === 'id2') {
-                await sock.sendMessage(from, { text: "📊 Anda memilih Info!" });
-            } else if (buttonId === 'id3') {
-                await sock.sendMessage(from, { 
-                    text: `👑 Owner: ${config.author}\nWhatsApp: https://wa.me/${config.owner[0].replace('+', '')}` 
-                });
-            } else if (buttonId === 'id4') {
-                await sock.sendMessage(from, { text: "❌ Menu ditutup!" });
+            // Get message text
+            let text = '';
+            let type = '';
+            
+            if (msg.message.conversation) {
+                text = msg.message.conversation;
+                type = 'conversation';
+            } else if (msg.message.extendedTextMessage) {
+                text = msg.message.extendedTextMessage.text;
+                type = 'extendedTextMessage';
+            } else if (msg.message.imageMessage) {
+                text = msg.message.imageMessage.caption || '';
+                type = 'image';
+            } else if (msg.message.videoMessage) {
+                text = msg.message.videoMessage.caption || '';
+                type = 'video';
+            } else if (msg.message.documentMessage) {
+                text = msg.message.documentMessage.caption || '';
+                type = 'document';
             }
-        }
-    });
-
-    // Handle ketika ada button response
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (msg?.message?.listResponseMessage) {
-            const listId = msg.message.listResponseMessage.title;
-            await sock.sendMessage(msg.key.remoteJid, { 
-                text: `Anda memilih: ${listId}` 
-            });
-        }
-    });
-
-    return sock;
-}
-
-// Start bot
-startBot().catch(console.error);
+            
+            const command = text.toLowerCase().trim();
+            const args = text.trim().split(' ').slice(1);
+            const prefix = config.prefa.find(p => command.startsWith(p)) || '';
+            
+            // Log message
+            const logTime = moment().format('HH:mm:ss');
+            console.log(chalk.cyan(`[${logTime}] ${isGroup ? '👥' : '👤'} ${pushname}: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`));
+            
+            // Auto read message
+            await sock.readMessages([msg.key]);
+            
+            // Handle commands
+            if (prefix) {
+                const cmd = command.slice(prefix.length).split(' ')[0];
+                const fullCmd = command.slice(prefix.length);
+                
+                // Check plugins first
+                let pluginHandled = false;
+                for (const pluginName in plugins) {
+                    const plugin = plugins[pluginName];
+                    if (plugin.command && Array.isArray(plugin.command)) {
+                        for (const pluginCmd of plugin.command) {
+                            if (command.startsWith(pluginCmd) || cmd === pluginCmd.replace(prefix, '')) {
+                                try {
+                                    await plugin.execute(sock, msg, from, args, command);
+                                    pluginHandled = true;
+                                    return;
+                                } catch (error) {
+                                    console.error(chalk.red(`Plugin ${pluginName} error:`), error);
+                                    await sock.sendMessage(from, { 
+                                        text: `❌ Error in plugin: ${error.message}` 
+                                    });
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Built-in commands if not handled by plugin
+                if (!pluginHandled) {
+                    switch (cmd) {
+                        case 'menu':
+                            if (plugins.menu) {
+                                await plugins.menu.execute(sock, msg, from);
+                            } else {
+                                await sock.sendMessage(from, {
+                                    text: `*${config.botName} Menu*\n\nType .help for commands list`
+                                });
+                            }
+                            break;
+                            
+                        case 'ping':
+                            const start = Date.now();
+                            await sock.sendMessage(from, { text: '🏓 Pong!' });
+                            const latency = Date.now() - start;
+                            await sock.sendMessage(from, {
+                                text: `*PONG!*\n\n⚡ Latency: ${latency}ms\n📡 Server: Online\n💾 Memory: ${Helper.formatSize(process.memoryUsage().heapUsed)}`
+                            });
+                            break;
+                            
+                        case 'owner':
+                            await sock.sendMessage(from, {
+                                text: `*👑 OWNER INFORMATION*\n\nName: ${config.author}\nPhone: ${config.owner[0]}\nWhatsApp: https://wa.me/${config.owner[0].replace('+', '')}\n\nContact for support or bug reports.`
+                            });
+                            break;
+                            
+                        case 'info':
+                            const used = process.memoryUsage();
+                            const uptime = Helper.formatUptime(process.uptime());
+                            
+                            await sock.sendMessage(from, {
+                                text: `*🤖 BOT INFORMATION*\n\nName: ${config.botName}\nOwner: ${config.author}\nVersion: 2.0.0\nPlatform: Node.js ${process.version}\nUptime: ${uptime}\n\n*MEMORY USAGE*\nRSS: ${Helper.formatSize(used.rss)}\nHeap: ${Helper.formatSize(used.heapUsed)}/${Helper.formatSize(used.heapTotal)}\n\n*CONNECTION*\nStatus: Connected\nMode: Pairing Code\nPrefix: ${config.prefa.join(', ')}`
+                            });
+                            break;
+                            
+                        case 'stats':
+                            const chats = await sock.groupFetchAllParticipating();
+                            const chatCount = Object.keys(chats).length;
+                            
+                            await sock.sendMessage(from, {
+                                text: `*📊 BOT STATISTICS*\n\nGroups: ${chatCount}\nPlugins: ${Object.keys(plugins).length}\nUptime: ${Helper.formatUptime(process.uptime())}\nMemory: ${Helper.formatSize(process.memoryUsage().heapUsed)}\nNode: ${process.version}\nPlatform: ${process.platform}`
+                            });
+                            break;
+                            
+                        case 'runtime':
+                            const uptimeSec = process.uptime();
+                            const days = Math.floor(uptimeSec / 86400);
+                            const hours = Math.floor((uptimeSec % 86400) / 3600);
+                            const minutes = Math.floor((uptimeSec % 3600) / 60);
+                            const seconds = Math.floor(uptimeSec % 60);
+                            
+                            await sock.sendMessage(from, {
+                                text: `*⏰ RUNTIME*\n\n${days > 0 ? `${days} days ` : ''}${hours}h ${minutes}m ${seconds}s\n\nStarted: ${moment(Date.now() - (uptimeSec * 1000)).format('DD/MM/YYYY HH:mm:ss')}`
+                            });
+                            break;
+                            
+                        case 'speedtest':
+                            await sock.sendMessage(from, { text: '⏳ Testing speed...' });
+                            const execPromise = util.promisify(exec);
+                            try {
+                                const { stdout } = await execPromise('speed-test --json');
+                                const result = JSON.parse(stdout);
+                                await sock.sendMessage(from, {
+                                    text: `*📶 SPEED TEST*\n\nPing: ${result.ping} ms\nDownload: ${(result.download / 1000000).toFixed(2)} Mbps\nUpload: ${(result.upload / 1000000).toFixed(2)} Mbps\nISP: ${result.isp}\nServer: ${result.server.name}`
+                                });
+                            } catch (error) {
+                                await sock.sendMessage(from, {
+                                    text: '❌ Speed test failed. Install: npm install -g speed-test'
+                                });
+                            }
+                            break;
+                            
+                        case 'sc':
+                        case 'source':
+                        case 'script':
+                            await sock.sendMessage(from, {
+                                text: `*📁 SOURCE CODE*\n\nBot Name: ${config.botName}\nCreator: ${config.author}\nVersion: 2.0.0\n\nThis bot is private and not open source.\nContact owner for more information.`
+                            });
+                            break;
+                            
+                        case 'donate':
+                        case 'donasi':
+                            await sock.sendMessage(from, {
+                                text: `*💝 DONATION*\n\nThank you for considering donation!\n\nYour support helps maintain this bot!`
+                            });
+                            break;
+                            
+                        default:
+                            // Check if command exists in any plugin
+                            let found = false;
+                            for (const pluginName in plugins) {
+                                const plugin = plugins[pluginName];
+                                if (plugin.command && Array.isArray(plugin.command)) {
+                                    for (const pluginCmd of plugin.command) {
+                                        if (command.startsWith(pluginCmd)) {
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if (!found) {
+                                await sock.sendMessage(from, {
+                                    text: `❌ Command not found!\n\nType .menu to see available commands.\nType .help for help menu.`
+                                });
+                            }
+                            break;
+                    }
+                }
+            }
+            
+            // Auto response for non-commands
+            if (!prefix && text) {
+                const lowerText = text.toLowerCase();
+                const responses = {
+                    'hai': `Hai juga ${pushname}! 👋`,
+                    'halo': `Halo ${pushname}! 😊`,
+                    'p': `Ada apa ${pushname}?`,
+                    'bot': `Ya, saya ${config.botName}! 🤖`,
+                    'wesker': `Yes, that's me! ${config.author} is my creator.`,
+                    'thanks': `You're welcome ${pushname}! 😊`,
+                    'makasih': `Sama-sama ${pushname}! 😄`
+                };
+                
+                for (const [key, response] of Object.entries(responses)) {
+                    if (lowerText.includes(key)) {
+                        await sock.sendMessage(from, 
