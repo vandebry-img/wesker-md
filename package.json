@@ -1,23 +1,82 @@
 {
   "name": "wesker-md-bot",
-  "version": "1.0.0",
-  "description": "WhatsApp Bot Wesker-MD dengan OTP Pairing",
+  "version": "2.0.0",
+  "description": "WhatsApp Bot MD dengan Pairing Code dan Plugins",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "pair": "node pair.js"
+    "pair": "node pair.js",
+    "start-bot": "node start.js",
+    "pm2-start": "pm2 start ecosystem.config.js",
+    "pm2-stop": "pm2 stop wesker-md",
+    "pm2-restart": "pm2 restart wesker-md",
+    "pm2-logs": "pm2 logs wesker-md",
+    "pm2-monit": "pm2 monit"
   },
+  "keywords": [
+    "whatsapp-bot",
+    "baileys",
+    "multi-device",
+    "wesker-md",
+    "whatsapp-md"
+  ],
+  "author": "𝐅𝐞𝐛𝐫𝐲𝐖𝐞𝐬𝐤𝐞𝐫",
+  "license": "MIT",
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.4.0",
+    "@whiskeysockets/baileys": "^6.5.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "axios": "^1.6.5",
+    "fluent-ffmpeg": "^2.1.2",
+    "form-data": "^4.0.0",
+    "cheerio": "^1.0.0-rc.12",
+    "google-translate-api-x": "^10.7.0",
     "qrcode-terminal": "^0.12.0",
-    "fs-extra": "^11.1.1",
+    "fs-extra": "^11.2.0",
     "chalk": "^4.1.2",
     "moment": "^2.29.4",
-    "axios": "^1.6.0",
-    "express": "^4.18.2"
+    "moment-timezone": "^0.5.43",
+    "node-cron": "^3.0.3",
+    "pino": "^8.16.1",
+    "pino-pretty": "^10.2.3",
+    "speed-test": "^4.2.0",
+    "ytdl-core": "^4.11.5",
+    "ytsr": "^3.8.2",
+    "tiktok-scraper": "^1.4.50",
+    "instagram-url-direct": "^1.0.6",
+    "fb-downloader-scrapper": "^1.0.4",
+    "twitter-url-direct": "^1.0.4",
+    "g-i-s": "^2.1.13",
+    "translate-google-api": "^1.0.5",
+    "wallpaper": "^6.1.1",
+    "weather-js": "^2.0.0",
+    "cowsay": "^1.5.0",
+    "figlet": "^1.7.0",
+    "gradient-string": "^2.0.2",
+    "node-emoji": "^1.11.0",
+    "uuid": "^9.0.1",
+    "mime-types": "^2.1.35",
+    "lodash": "^4.17.21",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
-  }
+    "nodemon": "^3.0.1",
+    "pm2": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=7.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/febrywesker/wesker-md.git"
+  },
+  "bugs": {
+    "url": "https://github.com/febrywesker/wesker-md/issues"
+  },
+  "homepage": "https://github.com/febrywesker/wesker-md#readme"
 }
