@@ -25,86 +25,123 @@ async function pairDevice() {
     
     const { version } = await fetchLatestBaileysVersion();
     
-    console.log(chalk.yellow('🔄 Membuat koneksi...'));
+    console.log(chalk.yellow('🔄 Connecting to WhatsApp...'));
     
     const sock = makeWASocket({
         version,
         auth: {
             creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+            keys: makeCacheableSignalKeyStore(state.keys, require('pino')({ level: 'silent' })),
         },
         browser: Browsers.ubuntu('Chrome'),
-        printQRInTerminal: false, // Tidak pakai QR
+        printQRInTerminal: false,
     });
     
     sock.ev.on('creds.update', saveCreds);
     
+    let pairingCodeDisplayed = false;
+    
     sock.ev.on('connection.update', async (update) => {
-        const { connection, qr, isNewLogin } = update;
+        const { connection, qr, pairingCode } = update;
         
-        if (qr) {
-            console.log(chalk.red('⚠️  QR Code muncul, restart dengan mode pairing.'));
-            console.log(chalk.yellow('Gunakan: node index.js'));
-            process.exit(0);
+        if (qr && !pairingCodeDisplayed) {
+            console.log(chalk.red('⚠️  QR Code detected! Using pairing code instead.'));
+            pairingCodeDisplayed = true;
+        }
+        
+        if (pairingCode) {
+            console.log(chalk.green.bold(`\n🔢 PAIRING CODE: ${pairingCode}`));
+            console.log(chalk.yellow.bold('\n📱 FOLLOW THESE STEPS:'));
+            console.log(chalk.white('1. Open WhatsApp on your phone'));
+            console.log(chalk.white('2. Go to Menu → Linked Devices → Link a Device'));
+            console.log(chalk.white('3. Select "Link with phone number"'));
+            console.log(chalk.white(`4. Enter phone number: ${config.pairingNumber}`));
+            console.log(chalk.white(`5. Enter this code: ${pairingCode}`));
+            console.log(chalk.white('6. Wait for connection...\n'));
+            
+            // Save pairing code to file
+            fs.writeFileSync('./pairing_code.txt', `Code: ${pairingCode}\nTime: ${new Date().toLocaleString()}\nNumber: ${config.pairingNumber}`);
+            console.log(chalk.blue('📝 Pairing code saved to pairing_code.txt'));
         }
         
         if (connection === 'open') {
-            console.log(chalk.green('✅ Pairing berhasil!'));
-            console.log(chalk.cyan(`🤖 Bot terhubung sebagai: ${sock.user?.name || 'Unknown'}`));
-            console.log(chalk.cyan(`📱 Nomor: ${sock.user?.id.split(':')[0] || 'Unknown'}`));
+            console.log(chalk.green.bold('\n✅ PAIRING SUCCESSFUL!'));
+            console.log(chalk.cyan(`🤖 Connected as: ${sock.user?.name || 'Unknown'}`));
+            console.log(chalk.cyan(`📱 Number: ${sock.user?.id?.split(':')[0] || 'Unknown'}`));
+            console.log(chalk.cyan(`🆔 JID: ${sock.user?.id || 'Unknown'}`));
             
-            // Simpan informasi pairing
-            const pairData = {
+            // Save pairing info
+            const pairInfo = {
                 paired: true,
-                pairedAt: new Date().toISOString(),
+                timestamp: new Date().toISOString(),
                 user: sock.user,
-                platform: 'pairing-code'
+                pairingCode: pairingCode,
+                device: 'pairing-mode'
             };
             
-            fs.writeFileSync('./session/pairing.json', JSON.stringify(pairData, null, 2));
+            fs.writeFileSync('./session/pairing_info.json', JSON.stringify(pairInfo, null, 2));
             
-            console.log(chalk.green('\n🎉 Pairing selesai!'));
-            console.log(chalk.yellow('\n📝 Mulai bot dengan:'));
-            console.log(chalk.white('   npm start'));
-            console.log(chalk.white('   atau'));
-            console.log(chalk.white('   node index.js\n'));
+            console.log(chalk.green('\n🎉 Pairing completed successfully!'));
+            console.log(chalk.yellow('\n🚀 Starting bot...'));
+            console.log(chalk.white('   Run: npm start'));
+            console.log(chalk.white('   or: node index.js\n'));
             
-            process.exit(0);
+            // Auto start bot after pairing
+            setTimeout(() => {
+                console.log(chalk.blue('🔗 Launching bot in 5 seconds...'));
+                setTimeout(() => {
+                    require('./index');
+                }, 5000);
+            }, 3000);
         }
         
-        // Jika meminta pairing code
-        if (update.pairingCode) {
-            console.log(chalk.green(`\n🔢 Pairing Code: ${update.pairingCode}`));
-            console.log(chalk.yellow('\n📱 Langkah-langkah:'));
-            console.log(chalk.white('1. Buka WhatsApp di HP'));
-            console.log(chalk.white(`2. Pergi ke Menu → Linked Devices → Link a Device`));
-            console.log(chalk.white(`3. Pilih "Link with phone number"`));
-            console.log(chalk.white(`4. Masukkan nomor: ${config.pairingNumber || config.owner[0]}`));
-            console.log(chalk.white(`5. Masukkan kode: ${update.pairingCode}`));
-            console.log(chalk.white(`6. Tunggu hingga bot terhubung...\n`));
-        }
-        
-        if (isNewLogin) {
-            console.log(chalk.green('🔄 Login baru terdeteksi!'));
+        if (connection === 'close') {
+            console.log(chalk.red('\n❌ Pairing failed or connection closed.'));
+            console.log(chalk.yellow('Try again or check your internet connection.'));
+            process.exit(1);
         }
     });
     
-    // Coba request pairing code
+    // Request pairing code after 3 seconds
     setTimeout(() => {
-        console.log(chalk.yellow('🔄 Meminta pairing code...'));
-        sock.requestPairingCode(config.pairingNumber || config.owner[0]);
+        if (!pairingCodeDisplayed) {
+            console.log(chalk.yellow('📡 Requesting pairing code...'));
+            sock.requestPairingCode(config.pairingNumber || config.owner[0]);
+        }
     }, 3000);
     
-    // Auto exit setelah 5 menit
+    // Timeout after 10 minutes
     setTimeout(() => {
-        console.log(chalk.red('\n⏰ Waktu pairing habis!'));
-        console.log(chalk.yellow('Silakan coba lagi.'));
+        console.log(chalk.red('\n⏰ Pairing timeout! (10 minutes)'));
+        console.log(chalk.yellow('Please try again.'));
         process.exit(1);
-    }, 5 * 60 * 1000);
+    }, 10 * 60 * 1000);
+    
+    // Handle process exit
+    process.on('SIGINT', () => {
+        console.log(chalk.yellow('\n🛑 Pairing cancelled by user.'));
+        process.exit(0);
+    });
 }
 
-// Jalankan pairing
-pairDevice().catch(err => {
-    console.error(chalk.red('Error:', err));
-    process.exit(1);
-});
+// Check if already paired
+if (fs.existsSync('./session/creds.json')) {
+    console.log(chalk.yellow('⚠️  Session already exists!'));
+    rl.question('Do you want to pair again? (y/N): ', (answer) => {
+        if (answer.toLowerCase() === 'y') {
+            console.log(chalk.yellow('🗑️  Removing old session...'));
+            fs.removeSync('./session');
+            pairDevice().catch(console.error);
+        } else {
+            console.log(chalk.green('✅ Keeping existing session.'));
+            console.log(chalk.blue('Run: npm start to start bot.'));
+            rl.close();
+            process.exit(0);
+        }
+    });
+} else {
+    pairDevice().catch(error => {
+        console.error(chalk.red('❌ Pairing error:'), error);
+        process.exit(1);
+    });
+}
