@@ -1,5 +1,5 @@
 export default {
-  owner: process.env.OWNER || "6281510040802",
+  owner: process.env.OWNER || "62812xxxxxxx",
   botName: process.env.BOT_NAME || "Wesker-MD",
   prefix: ["/", "!", "."],
   sticker: {
