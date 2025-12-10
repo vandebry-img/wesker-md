@@ -1,9 +1,9 @@
 export default {
-  owner: "6281510040802",
-  botName: "Wesker-MD",
-  prefix: ["/", "!", "."],        // semua ini diterima
+  owner: process.env.OWNER || "6281510040802",
+  botName: process.env.BOT_NAME || "Wesker-MD",
+  prefix: ["/", "!", "."],
   sticker: {
-    pack: "Wesker-MD",
-    author: "Febry"
+    pack: process.env.STICKER_PACK || "Wesker-MD",
+    author: process.env.STICKER_AUTHOR || "Febry"
   }
 };
